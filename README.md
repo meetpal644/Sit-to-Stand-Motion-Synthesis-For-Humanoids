@@ -14,7 +14,7 @@ success** across all eight chair heights.
 **Demo video:** https://youtu.be/SgSlgJRrlcE
 
 <p align="center">
-  <img src="sts_stop_motion.png" width="72%" alt="Stop-motion frames of a sit-to-stand rollout">
+  <img src="media/sts_stop_motion.png" width="72%" alt="Stop-motion frames of a sit-to-stand rollout">
 </p>
 <p align="center"><em>Stop-motion frames of a single sit-to-stand rollout: the robot rises from the chair, loads through the feet, and settles into a balanced stand. Direct output of the released policy (see <a href="#usage">Usage</a>).</em></p>
 
