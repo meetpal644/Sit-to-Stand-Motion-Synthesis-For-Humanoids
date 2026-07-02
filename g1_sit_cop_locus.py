@@ -1,31 +1,24 @@
 """
-G1 Sit-to-Stand — COP locus figure (read-only analysis)
-=======================================================
-Single deterministic, force-free rollout on one chair lane. ONE top-down window:
-the measured COP (force-weighted over the 9 touch sites) over the first
---window-s seconds of the rise, drawn as a time-colored trail (blue=early →
-red=late) against static support regions:
-  - dashed "seat + foot" hull = convex hull of time-averaged foot corners + butt
-  - left / right foot rectangles = axis-aligned boxes through each foot's 4 COP
-    contact sites (time-averaged)
-  - chair rectangle = seat box half-extents (g1_smooth.xml) centered on the
-    pelvis/seat contact site at peak butt load
-  - dashed convex hull over foot corners only ("foot support")
-  - dashed convex hull over foot corners + pelvis seat contact ("seat + foot support")
-The COP begins near the seat/butt support and migrates into the foot support as
-the robot transfers weight from the chair to its feet.
+G1 Sit-to-Stand — COP Locus Figure
+==================================
+Single deterministic, force-free rollout on one chair lane. Plots the measured
+center of pressure (COP) over the first --window-s seconds as a time-colored trail
+(blue = early, red = late) against static support regions:
 
-Foot/butt coordinates are TIME-AVERAGED over the window so the polygons are clean
-and stable (the feet jitter slightly during the push-off).
+  - foot and seat+foot convex hulls (dashed)
+  - per-foot rectangles from time-averaged contact sites
+  - chair rectangle from the seat geom in g1_smooth.xml
 
-Why --settle-steps: the seated CSV poses rest the butt ~12 mm above the seat, so
-without settling the butt never bears load. Holding the seated pose for K control
-steps lets the base sink onto the seat under gravity and load the butt first.
+Foot and butt coordinates are time-averaged over the window so the polygons stay
+stable while the feet jitter slightly during push-off.
 
-Reuses rollout physics/obs helpers from g1_sit_eval.py (import only; no eval run).
+The --settle-steps flag holds the seated pose briefly so the butt loads onto the
+seat before the policy runs (CSV poses start ~12 mm above the seat surface).
+
+Reuses rollout helpers from g1_sit_eval.py.
 
 Usage:
-  python g1_sit_cop_locus.py --beta 0.6 --lane 0 --tag locus_lane0
+  python g1_sit_cop_locus.py --model-dir models_g1_sit_gen_best --beta 0.6 --lane 0
 """
 from __future__ import annotations
 
@@ -182,7 +175,7 @@ def rollout_cop_trace(mj_model, mj_data, policy, vec_norm, ids, start_qpos, beta
     samples, reason, butt_peak = [], "timeout", 0.0
     butt_seat_xy = None                       # butt site xy at peak seat load
     for step_i in range(n_steps):
-        obs = get_obs(mj_data, mj_model, ids, prev_action, beta_max, obs_dim)
+        obs = get_obs(mj_data, prev_action, beta_max, obs_dim)
         action, _ = policy.predict(vec_norm.normalize_obs(obs.reshape(1, -1)),
                                    deterministic=True)
         action = np.clip(action.flatten(), -1.0, 1.0)
@@ -218,7 +211,7 @@ def rollout_cop_trace(mj_model, mj_data, policy, vec_norm, ids, start_qpos, beta
     }
 
 
-def plot_cop_locus(trace, *, lane, model_label, beta, row_idx, seed, out_png):
+def plot_cop_locus(trace, *, out_png):
     ss = trace["samples"]
     if not ss:
         raise RuntimeError("no COP samples to plot")
@@ -291,7 +284,7 @@ def plot_cop_locus(trace, *, lane, model_label, beta, row_idx, seed, out_png):
                edgecolors="0.1", linewidths=0.4, zorder=8, label="COP end")
 
     cbar = fig.colorbar(sc, ax=ax, fraction=0.045, pad=0.02)
-    cbar.set_label("time (s)  blue = early → red = late", fontsize = 13)
+    cbar.set_label("time (s)  blue = early → red = late", fontsize=13)
     ax.set_xlabel("world x (m)", fontsize=15)
     ax.set_ylabel("world y (m)", fontsize=15)
     all_xy = np.vstack([
@@ -371,8 +364,7 @@ def main():
         out_json = BASE_DIR / out_json
     out_png.parent.mkdir(parents=True, exist_ok=True)
 
-    plot_cop_locus(trace, lane=args.lane, model_label=mdir.name, beta=beta,
-                   row_idx=row_idx, seed=args.seed, out_png=out_png)
+    plot_cop_locus(trace, out_png=out_png)
 
     meta = {"tag": tag, "model_dir": str(mdir), "ckpt": ckpt_path.name,
             "vecnorm": vn_path.name, "beta_max": beta, "beta_src": beta_src,

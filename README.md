@@ -14,10 +14,9 @@ success** across all eight chair heights.
 **Demo video:** https://youtu.be/SgSlgJRrlcE
 
 <p align="center">
-  <img src="media/cop_locus_lane0.png" width="48%" alt="COP transfer from seat to foot support polygon">
-  <img src="media/com_head_trace.png" width="48%" alt="COM and head height during a sit-to-stand rollout">
+  <img src="sts_stop_motion.png" width="72%" alt="Stop-motion frames of a sit-to-stand rollout">
 </p>
-<p align="center"><em>Left: measured center-of-pressure transferring from the pelvis&ndash;seat contact into the foot support polygon. Right: COM and head height rising to a stable stand. Both are direct outputs of the released policy (see <a href="#usage">Usage</a>).</em></p>
+<p align="center"><em>Stop-motion frames of a single sit-to-stand rollout: the robot rises from the chair, loads through the feet, and settles into a balanced stand. Direct output of the released policy (see <a href="#usage">Usage</a>).</em></p>
 
 > This repository is a **validation / reproducibility package**. It ships the pretrained policy, its full
 > checkpoint trajectory, training curves, and a fully self-contained evaluation + visualization stack so

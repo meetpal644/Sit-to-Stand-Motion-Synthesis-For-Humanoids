@@ -1,23 +1,22 @@
 """
-G1 Sit-to-Stand — Evaluation Visualiser v3  (for env g1_sit_env_v3)
-Run with: mjpython g1_sit_viz_v3.py   (RENDER=True needs a display)
+G1 Sit-to-Stand — Evaluation Visualiser v3
+==========================================
+Run with: mjpython g1_sit_viz_v3.py  (RENDER=True needs a display)
 
-Force-free (or optional assist) evaluation of a trained v3 policy. Matches v3 env:
-  - Obs 97-D: 67-D proprio + a_{t-1}(29) + beta(1). Force NOT observed.
-  - Action: ctrl = clip(qpos + a*_BETA*BETA_MAX) with constant beta (no z-taper).
-  - Start pose from keyframes/ CSV (or XML keyframe fallback); arms zeroed like eval.
-  - stand_zone_frac uses rise_frac >= 0.8 (per-episode h0 captured at reset).
-  - Termination: com_z<0.35 OR |roll|>0.5 OR |pitch|>1.0.
-  - Seat highlight + camera auto-track the chosen chair lane (from start qpos_1).
+Force-free (or optional assist) evaluation of a trained v3 policy. Matches the
+training environment:
 
-Outputs sit_v3_eval_com.png, sit_v3_eval_states.png,
-sit_v3_eval_left_sagittal_pos.png, and sit_v3_eval_left_sagittal_tau.png.
+  - 97-D obs: proprio + previous action + beta (assist force not observed)
+  - Action: ctrl = clip(qpos + a * _BETA * BETA_MAX) with constant beta
+  - Start pose from keyframes/ CSV (or XML keyframe fallback); arms zeroed
+  - Termination: com_z < 0.35 or trunk roll/pitch beyond limits
+
+Saves sit_v3_eval_com.png, sit_v3_eval_states.png, and left-leg sagittal plots.
 """
 
 import csv
 import math
 import random
-import re
 import time
 from pathlib import Path
 
@@ -34,60 +33,48 @@ import matplotlib.pyplot as plt
 BASE_DIR = Path(__file__).parent
 
 # ================================================================
-# CONFIG
+# CONFIG — edit these before running
 # ================================================================
-# Start pose: CSV from keyframes/ (v3-style full qpos). None -> XML KEYFRAME.
-# Pick any chair lane here (0z..0.1z); the seat highlight + camera auto-follow it.
+# Start pose: CSV from keyframes/ (full qpos). None -> XML KEYFRAME.
+# The seat highlight and camera auto-follow the chosen chair lane.
 KEYFRAME_CSV = BASE_DIR / "keyframes" / "chair1_pose_0.1z.csv"
-KEYFRAME_ROW = "name"        # int row index | None = random | "max" = most-perturbed
-                                # row | "name" = first row whose name contains ALL
-                                # KEYFRAME_NAME_TOKENS substrings below
-KEYFRAME_NAME_TOKENS = ["tx+0.0", "p+0.0", "fx-0.03"]   # used when KEYFRAME_ROW=="name"
-KEYFRAME     = 7                 # XML fallback when KEYFRAME_CSV is None
-MAX_STEPS    = 1500              # training episode cap (40 s)
-RECORD_STEPS = 450               # steps logged/plotted
-SPEED        = 1.0
-RENDER       = True
-DETERMINISTIC = True           # True = deploy (mean) policy; False = sampled
+KEYFRAME_ROW = "name"        # int | None (random) | "max" | "name"
+KEYFRAME_NAME_TOKENS = ["tx+0.0", "p+0.0", "fx-0.03"]  # used when KEYFRAME_ROW == "name"
+KEYFRAME = 7                 # XML fallback when KEYFRAME_CSV is None
+MAX_STEPS = 1500             # training episode cap (40 s)
+RECORD_STEPS = 450           # steps logged and plotted
+SPEED = 1.0
+RENDER = True
+DETERMINISTIC = True         # True = mean action; False = sampled
 
 MODEL_DIR = BASE_DIR / "models_g1_sit_gen_best"
-# Pair checkpoint zip with its vec_normalize pkl (97-D obs required).
-# CKPT_ZIP  = MODEL_DIR / "sit_v3_abl_ckpt_69999552_steps.zip"
-# CKPT_VN   = MODEL_DIR / "sit_v3_abl_ckpt_vecnormalize_69999552_steps.pkl"
-CKPT_ZIP  = MODEL_DIR / "best_model.zip"
-CKPT_VN   = MODEL_DIR / "vec_normalize_best.pkl"
+CKPT_ZIP = MODEL_DIR / "best_model.zip"
+CKPT_VN = MODEL_DIR / "vec_normalize_best.pkl"
 
-# !!! BETA_MAX / FORCE_MAX must match the curriculum state of the loaded
-# checkpoint. beta IS observed (fed into the obs) AND scales the action, so a wrong
-# value gives both wrong obs and wrong physics; force is unobserved but applied.
-# Defaults below = completed curriculum (best_model after full HoST decay).
-BETA_MAX  = 0.6   # MUST equal curriculum/beta_max at this ckpt. Reference points:
-                   # 1.0 = run start; 0.8 = the pass where force first hits 0;
-                   # 0.6 = fully-decayed floor. Verify against the training log/TB.
-FORCE_MAX = 0.0    # MUST equal curriculum/force_max at this ckpt. 0 = force reached 0.
+# BETA_MAX and FORCE_MAX must match the curriculum state of the loaded checkpoint.
+# beta is observed and scales the action; force is unobserved but still applied.
+BETA_MAX = 0.6   # fully-decayed floor for best_model (see run_meta.json)
+FORCE_MAX = 0.0  # assist force at this checkpoint
 
-# ---- v3 / HoST constants (match g1_sit_env_v3.py) ----
-H_HEAD             = 1.2706
+H_HEAD = 1.2706
 TARGET_HEAD_HEIGHT = 1.3236
-RISE_STAND_FRAC    = 0.8         # standing phase + stand_zone_frac threshold (matches env/eval)
-GATE_WINDOW        = 50
+RISE_STAND_FRAC = 0.8
+GATE_WINDOW = 50
 
-# seat lane geometry (g1_smooth.xml): seat1..seat8 along +y at y=0,0.5..3.5;
-# seat tops = 0.2944 + base-z offset. Used to auto-place the camera/highlight.
-SEAT_Y_STEP        = 0.5
-SEAT_TOP_BASE      = 0.2944
-SEAT_Z_OFFSETS     = (0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075, 0.1)
-# Seat-contact diagnostic (g1_sit_env_v3._seat_contact); viz uses 1 cm margin vs env 5 mm.
-_SEAT_DZ           = 0.012
-VIZ_SEAT_MARGIN    = 0.025
+# Seat lane geometry (g1_smooth.xml): seat1..seat8 along +y.
+SEAT_Y_STEP = 0.5
+SEAT_TOP_BASE = 0.2944
+SEAT_Z_OFFSETS = (0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.075, 0.1)
+_SEAT_DZ = 0.012
+VIZ_SEAT_MARGIN = 0.025  # 2.5 cm; env uses 5 mm
 
-VIEWER_GEOM_ALPHA  = 1.0
-VIEWER_SEAT_ALPHA  = 1.0
-VIEWER_CAM_AZIMUTH   = 100.0
+VIEWER_GEOM_ALPHA = 1.0
+VIEWER_SEAT_ALPHA = 1.0
+VIEWER_CAM_AZIMUTH = 100.0
 VIEWER_CAM_ELEVATION = -10.0
-VIEWER_CAM_DISTANCE  = 3.0
-# SEAT_GEOM + VIEWER_CAM_LOOKAT are auto-derived from the start pose (see below).
-SEAT_GEOM         = "seat7"
+VIEWER_CAM_DISTANCE = 3.0
+# SEAT_GEOM and VIEWER_CAM_LOOKAT are set from the start pose below.
+SEAT_GEOM = "seat7"
 VIEWER_CAM_LOOKAT = (-0.25, 0.0, SEAT_TOP_BASE)
 # ================================================================
 
@@ -124,6 +111,20 @@ JOINT_UPPER = np.array([
     2.87, 0.34, 1.30, 2.61, 1.97, 0.52, 0.43,
 ], dtype=np.float64)
 
+LEG_JOINT_NAMES = ["hip_pitch", "hip_roll", "hip_yaw", "knee", "ankle_pitch", "ankle_roll"]
+WAIST_JOINT_NAMES = ["waist_yaw", "waist_roll", "waist_pitch"]
+LEFT_SAGITTAL_IDXS = (0, 3, 4)  # hip_pitch, knee, ankle_pitch
+LEFT_SAGITTAL_NAMES = [LEG_JOINT_NAMES[i] for i in LEFT_SAGITTAL_IDXS]
+LEFT_SAGITTAL_COLORS = ["tab:blue", "tab:orange", "tab:green"]
+SAG_PLOT_WINDOW_S = 5.0
+SAG_LINE_WIDTH = 2.8
+SAG_LABEL_SIZE = 20
+SAG_TICK_SIZE = 12
+SAG_LEGEND_SIZE = 17
+SAG_TITLE_SIZE = 5
+SAG_FIG_WIDTH = 13.0
+SAG_FIG_HEIGHT = 6.5
+
 
 def load_keyframes_csv(path):
     rows = []
@@ -140,18 +141,14 @@ _CSV_KEYFRAMES = load_keyframes_csv(KEYFRAME_CSV) if KEYFRAME_CSV else None
 
 
 def most_perturbed_row(keyframes):
-    """Index of the pool row whose seated posture deviates most from the pool mean
-    — the most 'disturbed' start in the IK sweep grid (a hardest-case stress test).
-    Uses the 15 leg+waist joints (qpos_7:22): arms are excluded (reset zeroes them)
-    and base xyz/quat are excluded so the baked chair y-offset doesn't dominate."""
+    """Row index with the largest leg+waist deviation from the pool mean (qpos 7:22)."""
     J   = np.array([q[7:22] for _, q in keyframes])      # (N, 15) leg+waist joints
     dev = np.linalg.norm(J - J.mean(axis=0), axis=1)      # per-row L2 deviation
     return int(np.argmax(dev)), float(dev.max())
 
 
 def find_row_by_tokens(keyframes, tokens):
-    """First pool row whose `name` contains ALL of `tokens` (plain substring match,
-    e.g. ['tx-0.03','p-0.05','fx+0.03'] selects that sweep-grid corner)."""
+    """First row whose name contains every token in `tokens`."""
     for i, (name, _) in enumerate(keyframes):
         if all(t in name for t in tokens):
             return i
@@ -181,18 +178,18 @@ def head_at_rise_frac(head_seated_ep, frac):
 
 
 def seat_top_at_reset(data, butt_sid):
-    """Per-episode seat-top reference (g1_sit_env_v3 reset_model)."""
+    """Seat-top height reference at episode reset."""
     butt_z = float(data.site_xpos[butt_sid][2])
     return butt_z - _SEAT_DZ
 
 
 def seat_contact_viz(butt_z, seat_top):
-    """Match env _seat_contact() with VIZ_SEAT_MARGIN (1 cm)."""
+    """Seat contact check using the viz margin (2.5 cm)."""
     return butt_z <= seat_top + VIZ_SEAT_MARGIN
 
 
 def get_obs(data, last_action, beta_now):
-    """97-D obs — must match g1_sit_env_v3._get_obs."""
+    """97-D observation vector (must match training env)."""
     g_body  = data.xmat[TORSO_ID].reshape(3, 3).T @ _G_WORLD
     ang_vel = data.sensordata[GYRO_ADR:GYRO_ADR + 3]
     lin_acc = data.sensordata[ACC_ADR:ACC_ADR + 3]
@@ -309,21 +306,6 @@ dt       = mj_model.opt.timestep * FRAME_SKIP
 PELVIS_ID = mj_model.body("pelvis").id
 HEAD_SID  = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_SITE, "head")
 BUTT_SID  = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_SITE, "cop_pelvis")
-
-LEG_JOINT_NAMES   = ["hip_pitch", "hip_roll", "hip_yaw", "knee", "ankle_pitch", "ankle_roll"]
-WAIST_JOINT_NAMES = ["waist_yaw", "waist_roll", "waist_pitch"]
-# Left leg sagittal (pitch-plane) DOFs only — indices into pos_log[:, 0:6].
-LEFT_SAGITTAL_IDXS  = (0, 3, 4)   # hip_pitch, knee, ankle_pitch
-LEFT_SAGITTAL_NAMES = [LEG_JOINT_NAMES[i] for i in LEFT_SAGITTAL_IDXS]
-LEFT_SAGITTAL_COLORS = ["tab:blue", "tab:orange", "tab:green"]
-SAG_PLOT_WINDOW_S   = 5.0          # left-leg sagittal figures: first 5 s only
-SAG_LINE_WIDTH      = 2.8
-SAG_LABEL_SIZE      = 20
-SAG_TICK_SIZE       = 12
-SAG_LEGEND_SIZE     = 17
-SAG_TITLE_SIZE      = 5
-SAG_FIG_WIDTH       = 13.0
-SAG_FIG_HEIGHT      = 6.5        # axes box aspect width:height = 1:2 (taller than wide)
 
 
 def plot_left_sagittal_panel(
