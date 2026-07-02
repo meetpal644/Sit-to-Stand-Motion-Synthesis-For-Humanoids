@@ -1,0 +1,29 @@
+# Sit-to-Stand Motion Synthesis for Humanoids — validation/evaluation dependencies
+#
+# The pinned core RL versions below are the exact ones recorded inside the
+# released checkpoint (models_g1_sit_gen_best/best_model.zip -> system_info.txt),
+# so the policy de-serialises and evaluates identically:
+#   Python 3.13.7 | Stable-Baselines3 2.7.1 | PyTorch 2.10.0 | NumPy 2.2.6
+#   Gymnasium 1.2.3 | Cloudpickle 3.1.2
+#
+# Install (CPU is sufficient — evaluation is headless and force-free):
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+
+# --- core RL / serialization stack (pinned for exact checkpoint reproduction) ---
+numpy==2.2.6
+gymnasium==1.2.3
+stable-baselines3==2.7.1
+cloudpickle==3.1.2
+# Training used torch 2.10.0+cu128; the CPU build is fine for evaluation.
+# SB3 2.7.1 requires torch>=2.3.
+torch>=2.3.0
+
+# --- physics simulation ---
+mujoco==3.4.0
+
+# --- plotting (visualiser + COP-locus figures) ---
+matplotlib>=3.8
+
+# --- training-curve inspection ---
+tensorboard>=2.16
