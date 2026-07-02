@@ -8,7 +8,7 @@ Official evaluation code and pretrained policy for the paper:
 A single reference-free Proximal Policy Optimization (PPO) policy learns smooth, human-like
 sit-to-stand (STS) motion for the 29-DOF **Unitree G1** across **eight chair heights**, driven by a
 coupled assist-force / chair-height curriculum, an IK-generated pose library, and biomechanics-inspired
-staged rewards. On a deterministic, force-free evaluator the released policy reaches **97.8% balanced-standing
+staged rewards. On a deterministic, force-free evaluator the released policy reaches **98.8% balanced-standing
 success** across all eight chair heights.
 
 **Demo video:** https://youtu.be/SgSlgJRrlcE
