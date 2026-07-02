@@ -28,6 +28,7 @@ success** across all eight chair heights.
 - [Installation](#installation)
 - [Repository Structure](#repository-structure)
 - [Pretrained Model](#pretrained-model)
+  - [Two released policies (and why the paper reports `gen_best`)](#two-released-policies-and-why-the-paper-reports-gen_best)
 - [Usage](#usage)
   - [1. Headless evaluation across all chair heights](#1-headless-evaluation-across-all-chair-heights)
   - [2. Watch a live rollout](#2-watch-a-live-rollout)
@@ -70,13 +71,19 @@ released checkpoint (`Stable-Baselines3 2.7.1`, `PyTorch 2.10.0`, `NumPy 2.2.6`,
 ├── assets/                        # G1 STL meshes referenced by g1_smooth.xml
 ├── keyframes/                     # 8 IK-generated seated-pose pools, one CSV per chair height
 │   └── chair1_pose_{0,0.01,...,0.1}z.csv
-├── models_g1_sit_gen_best/        # released best policy + full checkpoint trajectory
+├── models_g1_sit_gen_best/        # policy reported in the paper (full checkpoint trajectory)
 │   ├── best_model.zip             # the evaluated policy
 │   ├── vec_normalize_best.pkl     # matching observation/return normaliser
 │   ├── run_meta.json              # curriculum state of this checkpoint (beta=0.6, force=0)
-│   ├── eval_full.json             # reference eval used in the paper (97.8%)
+│   ├── eval_full.json             # reference eval used in the paper (97.8%, 50 resets/lane)
 │   └── sit_v3_ckpt_*_steps.zip    # intermediate checkpoints every 5M steps
-├── logs_g1_sit_gen_best/          # TensorBoard training curves for this run
+├── models_g1_sit_genbest_v2/      # alternate seed: higher raw success, less smooth (see below)
+│   ├── best_model.zip
+│   ├── vec_normalize_best.pkl
+│   ├── run_meta.json
+│   ├── eval_full_n40.json         # eval at 40 resets/lane
+│   └── sit_v3_ckpt_*_steps.zip
+├── logs_g1_sit_gen_best/          # TensorBoard training curves for the paper policy
 └── media/                         # teaser figures for this README
 ```
 
@@ -94,6 +101,42 @@ released checkpoint (`Stable-Baselines3 2.7.1`, `PyTorch 2.10.0`, `NumPy 2.2.6`,
 > **Important:** evaluation must use `--beta 0.6`. `beta` is both fed into the observation and scales the
 > action, so a mismatched value produces both out-of-distribution observations and wrong physics. The
 > correct value is stored in `run_meta.json` and used by default.
+
+### Two released policies (and why the paper reports `gen_best`)
+
+We release two fully-trained seeds of the same method so reviewers can inspect the trade-off directly.
+`models_g1_sit_genbest_v2` reaches a slightly higher raw success rate, but `models_g1_sit_gen_best`
+(the one reported in the paper) is a **better embodiment of the paper's central claims** — *smooth,
+low-effort, within-limit* motion.
+
+Both evaluated deterministically and force-free at `beta = 0.6` (aggregated over the 8 chair lanes):
+
+| Metric | `gen_best` (paper) | `genbest_v2` | Better | Relevance |
+|---|:---:|:---:|:---:|---|
+| Resets per lane | 50 | 40 | — | `gen_best` uses the full paper protocol |
+| Balanced success (%) | 97.8 | **98.8** | v2 | raw task completion |
+| Fall rate (%) | 2.2 | **1.3** | v2 | safety (falls) |
+| Energy over first 4 s (J) | 115.6 | **107.1** | v2 | effort |
+| Time-to-stand (s) | 3.55 | **3.43** | v2 | speed |
+| Capture-point in support | 0.993 | **0.996** | v2 | balance |
+| **Action jitter** | **1.535** | 1.774 | gen_best | **motion smoothness (core claim)** |
+| **S_q — joints within limits** | **0.963** | 0.724 | gen_best | **within-limit safety (core claim)** |
+| S_torque — torques within limits | 1.00 | 1.00 | tie | actuator safety |
+
+**Why we chose `gen_best` for the paper.** The paper's contribution is not the last decimal of success
+rate — it is a *smooth, human-like, within-limit* sit-to-stand that is amenable to physical
+implementation (the explicit gap we identify versus prior RL stand-up work such as HoST, whose motions
+are abrupt). On the two metrics that encode that claim, `genbest_v2` regresses sharply:
+
+- **Joint-limit safety `S_q` collapses from 0.96 to 0.72** — i.e. `genbest_v2` spends roughly a quarter
+  of its timesteps with at least one joint pushed outside its nominal range. That directly contradicts
+  the "within-limit motion" claim, even though no torque limit is violated (`S_torque = 1.00`).
+- **Action jitter rises ~16%** (1.535 → 1.774), i.e. visibly jerkier motion.
+
+`genbest_v2` buys its extra ~1% success and lower energy by moving more aggressively. For a controller
+meant to be safe and natural on hardware, that is the wrong trade, so the paper reports `gen_best`. We
+ship `genbest_v2` alongside it purely for transparency; anyone can reproduce the numbers above with the
+commands below (swap `--model-dir` and use `--n-resets 40` to match its bundled eval).
 
 ## Usage
 
@@ -115,6 +158,18 @@ python g1_sit_eval.py \
 This writes `models_g1_sit_gen_best/eval_reproduce.json`. Compare it against the bundled
 `eval_full.json` (the exact run behind the paper's numbers). The console prints the overall
 balanced-standing success (~0.98).
+
+To reproduce the alternate seed's numbers instead, point at the other model and match its protocol:
+
+```bash
+python g1_sit_eval.py \
+    --model-dir models_g1_sit_genbest_v2 \
+    --ckpt best_model --vecnorm vec_normalize_best \
+    --beta 0.6 --n-resets 40 --tag reproduce
+```
+
+See [Two released policies](#two-released-policies-and-why-the-paper-reports-gen_best) for how the two
+compare and why the paper reports `gen_best`.
 
 ### 2. Watch a live rollout
 

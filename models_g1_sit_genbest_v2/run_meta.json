@@ -1,0 +1,11 @@
+{
+    "config": "full",
+    "seed": 0,
+    "beta_max": 0.6,
+    "force_max": 0.0,
+    "obs_dim": 97,
+    "holdout_lanes": [],
+    "curriculum": true,
+    "curriculum_window": 30,
+    "curriculum_b_floor": 0.6
+  }
